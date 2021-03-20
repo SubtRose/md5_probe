@@ -1,0 +1,21 @@
+AIMS:
+------------------------
+
+- write a md5 algorithm by assembler(NASM) to target machine (AMD64);
+- does too same but it need by C(to portability);
+
+TERMINOLOGY:
+
+- WORD is a 32-bit quantity;
+- BYTE is a 8-bit quintity;
+
+
+SOME INFO
+-------------------------
+Input is in argv[x], maximal length of source message is 8192 bytes(MAXSIZE);
+Output to stdout;
+Descriptions MD5 algorithm - ????; 
+
+ERROR'S SIGNATURE
+-------------------------
+0x01 - overflow input buffer(SOURCELENGTH > MAXSIZE);
