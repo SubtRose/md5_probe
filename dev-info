@@ -12,10 +12,12 @@ TERMINOLOGY:
 
 SOME INFO
 -------------------------
-Input is in argv[x], maximal length of source message is 8192 bytes(MAXSIZE);
+Input is in argv[1](for assembler);
 Output to stdout;
 Descriptions MD5 algorithm - ????; 
 
 ERROR'S SIGNATURE
 -------------------------
-0x01 - overflow input buffer(SOURCELENGTH > MAXSIZE);
+0x01 - no message;
+0x02 - enough memory();
+

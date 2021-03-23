@@ -1,308 +1,254 @@
-;; Five stage-procedures:
-;;	1. Append Padding Bits
-;;	2. Append Length
-;;	3. Initialize MD buffer
-;;		3.1 Initialize other objects
-;;	4. Process Message in 16-Word Blocks
-;;	5. Output
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
 section .bss
-	SOURCE_MESSAGE	resb MAX_SIZE		;; input buffer
-	SOURCE_LENGTH_0	resqw 1			;; size of source message(in bytes)
-	SOURCE_LENGTH	resqw 1			;; size of padded source(in bytes)
-	MD5_HASH 	resb MD5_LENGTH		;; 128 bits
+	ERRORCODE: 	resd	1
+	INPUTMESSAGE:	resq	1	;; <--(address) 
+	INPUTLEN:	resd	1	
+	SOURCEMESSAGE:	resq	1	;; (address)
+	SOURCELEN:	resd	1
+	MD5HASH:	resb	0x10
+	MD5BCP:		resb	0x10
+	
 section .text
-	MAX_SIZE:	dw	0x2000
-	MD5_LENGTH:	dw	0x10
-	TABLE:		dw .....	;; 64 entries for 4 bytes
-	SEQUENCE_S:	db .....	;; 16 entries for 1 byte
-	SEQUENCE_K:	db .....	;; 64 entries for 1 bytes
 
-padding_message:
-	push rcx
-	push rdx
-	push rsi
-	
-	mov rcx, QWORD[SOURCE_LENGTH_0]
-	lea rsi, [SOURCE_MESSAGE+rcx]
-	or BYTE[rsi], 0x80
-	sub rsi, rcx	
-	shl rcx, 3				;; unit is bit
-	inc rcx
-
-	mov rdx, 448
-padding:
-	cmp rcx, rdx
-	jle padded
-	add rdx, 512
-	jmp padding
-padded:
-	shr rdx, 3				;; unit is byte
-	mov QWORD[SOURCE_LENGTH], rdx
-
-	;;NEED TO ZEROING!!!;;
-	
-	pop rsi
-	pop rdx
-	pop rcx
-	ret
-
-append_lengthof_message:
-	push rsi
-	push rdi
-	mov rsi, QWORD[SOURCE_LENGTH]
-	lea rdi, [SOURCE_MESSAGE+rsi-0x40]
-	mov rsi, QWORD[SOURCE_LENGTH_0]
-	shl rsi, 3		;; unit is bits
-	cld
-	movsq
-	pop rdi
-	pop rsi	
-	ret
-
-;;3 stage: Initialize MD5 buffer;;;;;;;;;;;;;;;;
-init_MD5_buffer:
-	push rdi
-	lea rdi, [MD5_HASH]
-	DWORD[rdi], 0x01234567
-	add edi, 4
-	DWORD[rdi], 0x89abcdef
-	add edi, 4
-	DWORD[rdi], 0xfedcba98
-	add edi, 4
-	DWORD[rdi], 0x76543210	
-	pop rdi
-	ret
-
-	
-
-;;4 stage: Processing MD buffer;;;;;;;;;;;;;;;;;
-	MD5BCP:			db	-0X10
-	WORD512BLK:		db	-0x18
-	LIMIT_SOURCE:		db	-0x20
-	FGHI:			db	-0x40
-	DEPTH_STACK_PROC:	db	-0x40
-	
-processing_MD5_buffer:
-	push rcx
-	push rdx
-	push rdi
-	push rsi
-	push rbp
-	mov rbp, rsp
-	sub esp, DEPTH_STACK_PROC
-
-	lea rsi, [SOURCE_MESSAGE]
-	mov QWORD[rbp+WORD512BLK], rsi		;; current 512-bit block
-	mov edx, DWORD[SOURCE_LENGTH]
-	add esi, edx 
-	mov QWORD[rbp+LIMIT_SOURCE], rsi	;; end of padded message
-
-;;foreach 512-bit block;;
-foreach_512:
-
-	;;;;;;backup md5 buffer;;;;;;;;;;;;;;;;
-	mov ecx, 4
-	lea rsi, [MD5_HASH]
-	lea rdi, [rbp+M5BCP]
-	cld
-	rep movsd	
-	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-	
-	;;internals cycles;;;;;;;;;;;;;;;;;;;;;;;;;
-	;;round_procedure(void);;;;;;;;;;;;;;;;;;;;
-	call round_procedure
-	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-
-	;;refresh md5-hash's buffer;;
-	lea rdi, [MD5_HASH]
-	lea rsi, [rbp+MD5BCP]
-	mov ecx, 4
-refresh_md5_x:
-	add DWORD[rdi], DWORD[rsi]
-	add rdi, 4
-	add rsi, 4
-	loop refresh_md5_x
-	;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
-
-	add QWORD[rbp+WORD512BLK], 8
-	cmp QWORD[rbp+WORD512BLK], QWORD[rbp+LIMIT_SOURCE]
-	jl foreach_512
-;;end foreach_512;;
-
-	add esp, DEPTH_STACK_PROC
-	pop rbp
-	pop rsi
-	pop rdi
-	pop rdx
-	pop rcx
-	ret
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;5 stage: Output;;;;;;;;;;;;;;;;;;;;;;;;;
-	mov eax, WRITE_CODE_FROM_ABI_X64
-	mov edi, STDOUT_STREAM
-	lea rsi, MD5_HASH
-	mov edx, MD5_LENGTH
-	syscall
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; finishing program
-	mov eax, EXIT_CODE_FROM_ABI_X64
-	mov edi, ERROR_CODE
-	syscall
-
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;ADDITIONAL PROCEDURE;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;;FGHI-PROCEDURES;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;DWORD(eax) X_FUNC(DWORD(edi), DWORD(esi), DWOTR(edx));;
-F_FUNC:
+;; X - %edi, Y - %esi, Z - %edx, result -  %edi	;;
+f_func:
 	and esi, edi
 	not edi
 	and edi, edx
-	or esi, edi
-	mov eax, esi
+	or edi, esi
 	ret
-G_FUNC:
+g_func:
 	and edi, edx
 	not edx
 	and esi, edx
-	or edi, esi
-	mov eax, edi
+	or edi, edi
 	ret
-H_FUNC:
+h_func:
+	xor esi, edx
 	xor edi, esi
-	xor edi, edx
-	mov eax, edi
 	ret
-I_FUNC:
+i_func:
 	not edx
 	or edi, edx
-	xor esi, edi
-	mov eax, esi
+	xor edi, esi
 	ret
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 
-;;round-procedure(void);;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;round[abcd k s i];;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;a = b + ((a + FGHI(b,c,d) + X[k] + T[i]) <<< s);;;;;;;;;;;
-;;STACK-FRAME OF ROUND-PROCEDURE IS PART OF STACK-FRAME;;;;;
-;;OF MAIN PROCEDURE;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	ROTFUNC:	dq	f_function, g_function, h_function, i_function	
+	S_SEQ:		db	0x07, 0x0c, 0x11, 0x16,
+			db	0x05, 0x09, 0x0e, 0x14,
+			db	0x04, 0x0b, 0x10, 0x17,
+			db	0x06, 0x0a, 0x0f, 0x15
 
-	;;PRERESERVED REGISTERS(TO FUNCTIONS)	
-	;;	RESULT, X, Y, Z, CORRESPONDLY	-	EAX, EDI, ESI, EDX;
-	;;CNT_I					-	RCX;
-	;;CNT_J					-	RBX;
-	;;CNT_I & 0X03				-	R7;
-	;;CURRENT 32-BITS BLOCK OF HASH(ADDR)	-	R8;
-	;;CURRENT S-VALUE			-	R9;
-	;;CURRENT K-VALUE			-	R10;
-	;;CURRENT X-VALUE(ADDR)			-	R11;
-	;;CURRENT FGHI-FUNCTION(ADDR)		-	R12;
-	;;TABLE[CNT_I]				-	R13;	
+	K_SEQ:		db	0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,
+			db	0x08,0x09,0x0a,0x0b,0x0c,0x0d,0x0e,0x0f,
 
-round_procedure:
-	push rax
-	push rbx
-	push rcx
-	push rdx
+			db	0x01,0x06,0x0b,0x00,0x05,0x0a,0x0f,0x04,
+			db	0x09,0x0e,0x03,0x08,0x0d,0x02,0x07,0x0c,
+	
+			db	0x05,0x08,0x0b,0x0e,0x01,0x04,0x07,0x0a,
+			db	0x0d,0x00,0x03,0x06,0x09,0x0c,0x0f,0x02,
+			
+			db	0x00,0x07,0x0e,0x05,0x0c,0x03,0x0a,0x01,
+			db	0x08,0x0f,0x06,0x0d,0x04,0x0b,0x02,0x09	
+	
+	T_SEQ:		dd	0xd76aa478,0xe8c7b756,0x242070db,0xc1bdceee,
+	                dd	0xf57c0faf,0x4787c62a,0xa8304613,0xfd469501,
+        	        dd	0x698098d8,0x8b44f7af,0xffff5bb1,0x895cd7be, 
+	                dd	0x6b901122,0xfd987193,0xa679438e,0x49b40821,
+        	        dd	0xf61e2562,0xc040b340,0x265e5a51,0xe9b6c7aa,
+                	dd	0xd62f105d,0x2441453,0xd8a1e681,0xe7d3fbc8,
+	                dd	0x21e1cde6 0xc33707d6,0xf4d50d87,0x455a14ed,
+        	        dd	0xa9e3e905,0xfcefa3f8,0x676f02d9,0x8d2a4c8a,
+	                dd	0xfffa3942,0x8771f681,0x6d9d6122,0xfde5380c,
+        	        dd	0xa4beea44,0x4bdecfa9,0xf6bb4b60,0xbebfbc70,
+	                dd	0x289b7ec6,0xeaa127fa,0xd4ef3085,0x4881d05,
+        	        dd	0xd9d4d039,0xe6db99e5,0x1fa27cf8,0xc4ac5665,
+                	dd	0xf4292244,0x432aff97,0xab9423a7,0xfc93a039,
+	                dd	0x655b59c3,0x8f0ccc92,0xffeff47d,0x85845dd1,
+	                dd	0x6fa87e4f,0xfe2ce6e0,0xa3014314,0x4e0811a1,
+        	        dd	0xf7537e82,0xbd3af235,0x2ad7d2bb,0xeb86d391
+
+;; [abcd k s i]
+;; a = b + ((a + Func(b,c,d) + X[k] + T[i]) <<< s)
+complete_all_rounds:
+	mov ecx, 1
+step:
+	;; initaliazation and fetching
+	mov r7b, cl
+	and r7, 0x03
+
+	mov r9, rcx
+	shr r9, 0x04
+	and r9, 0x03
+
+	lea rdi, [MD5HASH]
+
+	lea r8, [ROTFUNC+8*r9]
+
+	mov bl, BYTE[S_SEQ+r7+4*r9]
+
+	push r7
+	xor r7, r7
+	mov r7b, BYTE[K_SEQ+rcx]
+	mov esi, DWORD[r10+4*r7]
+	pop r7
+
+	mov edx, DWORD[T_SEQ+4*r7]
+	
+	;; processing
+	mov r12d, DWORD[rdi+4*r7]
 	push rdi
 	push rsi
+	push rdx
 	push r7
-	push r8
-	push r9
-	push r10
-	push r11
-	push r12
-	push r13
-
-	;;iteration's body;;
-	mov ecx, 1
-	xor ebx, ebx
-round_loop:
-	mov bl, cl
-	shr bl, 4	;;CNT_J
-
-	mov r7b, cl
-	and r7b, 0x03	;; CNT_I & 0X03
-
-	lea r8, [MD5_HASH+4*r7]	;; CURRENT BLK OF HASH
-
-	push r7
-	inc r7b
-	and r7b, 0x03
-	mov edi, DWORD[r8+4*r7] 
-	inc r7b
-	and r7b, 0x03
-	mov esi, DWORD[r8+4*r7]
-	inc r7b
-	and r7b, 0x03
-	mov edx, DWORD[r8+4*r7]		;;set a XYZ-context
+	mov r13, rdi
+	inc r7
+	and r7, 0x03
+	mov edi, DWORD[r13+4*r7]
+	inc r7
+	and r7, 0x03
+	mov esi, DWORD[r13+4*r7]
+	inc r7
+	and r7, 0x03
+	mov edx, DWORD[r13+4*r7]
+	call r8
+	add r12d, edi
 	pop r7
-
-	lea r9, [SEQUENCE_S]
-	add r9, r7
-	push rbx
-	shl bl, 2
-	add rbx, r9
-	xor r9d, r9d
-	mov r9b, BYTE[rbx]		;; set current S-value
-	pop rbx
-
-	lea r10, [SEQUENCE_K]	
-	push rcx
-	add rcx, r10
-	xor r10d, r10d
-	mov r10b, BYTE[rcx]		;; set current K-value
-	pop rcx
-	
-	lea r11, [SOURCE_MESSAGE+4*r10]	;; address to X[k]
-	
-	and bl, 0x03
-	lea r12, [FGHI+rbx]		;; current function
-
-	mow r13d, DWORD[TABLE+4*rcx]	;; 32-bit element from table
-	
-	push r8		
-	mov r8d, DWORD[r8]	;;tmp += a;
-	add r8d, r13d		;;tmp += T[i];
-	lea r11d, DWORD[r11]
-	add r8d, r11d;;	tmp += X[k];
-
-	push rdi
-	call r12
-	pop rdi
-	add r8d, eax	;;tmp += Func(b,c,d);
-	shl r8d, r9b	;;tmp <<= s;
-	add edi, r8d	;;	b += (tmp)
-	pop r8
-	mov DWORD[r8], edi	;;a=b	
-	
-	inc cl
-	cmp cl, 0x41
-	jl round_loop
-	
-
-	pop r13
-	pop r12
-	pop r11
-	pop r10
-	pop r9
-	pop r8
-	pop r7
+	pop rdx
 	pop rsi
 	pop rdi
-	pop rdx
-	pop rcx
-	pop rbx
-	pop rax
+	add r12d, edx
+	shl r12d, bl
+	add r12d, esi
+	mov DWORD[rdi], r12d
+		
+	inc cl
+	cmp cl, 0x41
+	jl step
+
 	ret
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+	
+_MD5:
+	call GET_SOURCE
+	call PADDING_MESSAGE
+	call APPEND_LENGTHOF_MESSAGE
+	call INIT_MD5_BUFFER
+	call PROCESSING_MD5_BUFFER
+	call WRITE_TO
+	call EXIT_
+
+;; input message into argv[1]
+GET_SOURCE:
+	or DWORD[ERRORCODE], 0x02
+	cmp rdi, 1
+	je EXIT
+	mov DWORD[ERRORCODE], 0x00
+	mov rsi, QWORD[rsi]
+	add rsi, 8			;; now rsi is address of input message
+	mov QWORD[INPUTMESSAGE], rsi
+
+	push rcx
+	mov rcx, rsi
+loop_strlen:
+	inc rcx
+	cmp BYTE[rcx], 0x00
+	jne loop_strlen
+
+	sub rcx, rsi
+	mov DWORD[INPUTLEN], ecx
+	pop rcx
+	ret
+
+PADDING_MESSAGE:
+	
+	mov ecx, DWORD[INPUTLEN]
+	shl ecx,3				;; now unit is BIT
+	inc ecx	
+	
+	mov edx, 448
+padding:
+	cmp ecx, edx
+	jle padded
+	add edx, 512
+	jmp padding
+padded:
+	shr edx, 3				;; now unit is BYTE
+	mov DWORD[SOURCELEN], edx
+
+	;; here's allocation memory for source message(padded)
+	mov eax, 9
+	xor edi, edi
+	mov esi, edx
+	mov edx, 0x01
+	or edx, 0x02		;;	RW- - permissions
+	mov r10, 0x02
+	or r10, 0x10		;; (MAP_PRIVATE(0x02) | MAP_ANONYMOUS(0x10))
+	mov r8, -1
+	xor r9d, r9d
+	syscall
+	
+	or DWORD[ERRORCODE], 0x01
+	cmp rax, 12			;; ENOMEM=12
+	je EXIT
+	mov DWORD[ERRORCODE], 0x00	
+	mov QWORD[SOURCEMESSAGE], rax
+
+	;; copy input message into source-buffer
+	mov rsi, QWORD[INPUTMESSAGE]
+	mov rdi, rax
+	mov ecx, DWORD[SOURCELEN]
+	push rcx
+	shr ecx, 3			;; for qword-processing
+	cld
+copy_padded:
+	movsq
+	loop copy_padded
+	
+	mov BYTE[rsi], 0x80
+	inc rsi
+	pop rcx 
+	lea rdi, [rax+rcx]		;; marking a boundary source-message	
+	
+zeroing:
+	mov BYTE[rsi], 0x00
+	inc rsi
+	cmp rsi, rdi
+	jl zeroing
+zeroed:
+	ret
+
+
+APPEND_LENGTOF_MESSAGE:
+	mov edx, DWORD[INPUTLEN]
+	shl edx, 3			;; now unit is BIT
+	mov ecx, DWORD[SOURCELEN]
+	mov QWORD[SOURCEMESSAGE+rcx-8], rcx
+	ret
+
+INIT_MD5_BUFFER:
+	lea rsi, [MD5HASH]
+	mov QWORD[rsi],		0xefcdab8967452301
+	mov QWORD[rsi+8],	0x1032547698badcfe
+	ret
+
+PROCESSING_MD5_BUFFER:
+	mov r10, QWORD[SOURCEMESSAGE]	;; %r10-->CRT_BLK512
+	xor r11, r11
+	mov r11d, DWORD[SOURCELEN]
+	add r11, r10			;; %r11-->LIMIT OF PROCESSING
+	
+proc_blk512:
+
+	call complete_all_rounds
+	add r10, 0x40
+	cmp r10, r11
+	jl proc_blk512
+
+	ret	
+
+EXIT:
+	;;ALSO HERE'S NEED DEALOCATION BUFFER-SOURCE (BY MUNMAP(), MAYBE);;
+	mov eax, 60
+	mov edi, DWORD[ERRORCODE]
+	syscall
+
