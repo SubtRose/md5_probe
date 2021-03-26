@@ -20,4 +20,9 @@ ERROR'S SIGNATURE
 -------------------------
 0x01 - no message;
 0x02 - enough memory();
+0x04 - write's error;
+
+USEFUL NASM INFO
+--------------------------
+-f file format:
 

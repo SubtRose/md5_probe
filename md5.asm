@@ -6,8 +6,11 @@ section .bss
 	SOURCELEN:	resd	1
 	MD5HASH:	resb	0x10
 	MD5BCP:		resb	0x10
+	FILEDESC:	resb	1
 	
 section .text
+
+global _start
 
 ;; X - %edi, Y - %esi, Z - %edx, result -  %edi	;;
 f_func:
@@ -32,8 +35,11 @@ i_func:
 	xor edi, esi
 	ret
 
+	HASHSIZE	equ	0x10
+	ADDRSIZE	equ	0x08
 
-	ROTFUNC:	dq	f_function, g_function, h_function, i_function	
+	ROTFUNC:	dq	f_func, g_func, h_func, i_func	
+
 	S_SEQ:		db	0x07, 0x0c, 0x11, 0x16,
 			db	0x05, 0x09, 0x0e, 0x14,
 			db	0x04, 0x0b, 0x10, 0x17,
@@ -72,10 +78,17 @@ i_func:
 ;; a = b + ((a + Func(b,c,d) + X[k] + T[i]) <<< s)
 complete_all_rounds:
 	mov ecx, 1
+
+	lea rdi, [MD5BCP]
+	lea rsi, [MD5HASH]
+	mov ecx, 2
+	cld
+	rep movsq		;; backuping
+	
 step:
 	;; initaliazation and fetching
-	mov r7b, cl
-	and r7, 0x03
+	mov r14b, cl
+	and r14, 0x03
 
 	mov r9, rcx
 	shr r9, 0x04
@@ -85,40 +98,45 @@ step:
 
 	lea r8, [ROTFUNC+8*r9]
 
-	mov bl, BYTE[S_SEQ+r7+4*r9]
+	mov bl, BYTE[S_SEQ+r14+4*r9]
 
-	push r7
-	xor r7, r7
-	mov r7b, BYTE[K_SEQ+rcx]
-	mov esi, DWORD[r10+4*r7]
-	pop r7
+	push r14
+	xor r14, r14
+	mov r14b, BYTE[K_SEQ+rcx]
+	mov esi, DWORD[r10+4*r14]
+	pop r14
 
-	mov edx, DWORD[T_SEQ+4*r7]
+	mov edx, DWORD[T_SEQ+4*r14]
 	
 	;; processing
-	mov r12d, DWORD[rdi+4*r7]
+	mov r12d, DWORD[rdi+4*r14]
 	push rdi
 	push rsi
 	push rdx
-	push r7
+	push r14
 	mov r13, rdi
-	inc r7
-	and r7, 0x03
-	mov edi, DWORD[r13+4*r7]
-	inc r7
-	and r7, 0x03
-	mov esi, DWORD[r13+4*r7]
-	inc r7
-	and r7, 0x03
-	mov edx, DWORD[r13+4*r7]
+	inc r14
+	and r14, 0x03
+	mov edi, DWORD[r13+4*r14]
+	inc r14
+	and r14, 0x03
+	mov esi, DWORD[r13+4*r14]
+	inc r14
+	and r14, 0x03
+	mov edx, DWORD[r13+4*r14]
 	call r8
 	add r12d, edi
-	pop r7
+	pop r14
 	pop rdx
 	pop rsi
 	pop rdi
 	add r12d, edx
-	shl r12d, bl
+
+	push rcx
+	mov cl, bl
+	shl r12d, cl
+	pop rcx
+
 	add r12d, esi
 	mov DWORD[rdi], r12d
 		
@@ -126,9 +144,21 @@ step:
 	cmp cl, 0x41
 	jl step
 
+	lea rsi, [MD5BCP]
+	lea rdi, [MD5HASH]
+	mov ecx, 4
+	push rbx
+re_backuping:
+	dec ecx
+	add ebx, DWORD[rsi+rcx]
+	add DWORD[rdi+rcx], ebx
+	loop re_backuping			;; re-backuping
+	pop rbx
+
 	ret
 	
-_MD5:
+_start:
+	
 	call GET_SOURCE
 	call PADDING_MESSAGE
 	call APPEND_LENGTHOF_MESSAGE
@@ -139,9 +169,19 @@ _MD5:
 
 ;; input message into argv[1]
 GET_SOURCE:
+	add rsp, ADDRSIZE
+	pop rdi
+	add rsp, ADDRSIZE
+	pop rsi
+	mov ecx, ADDRSIZE
+	shl rcx, 2
+	sub rsp, rcx
+		
+
+	mov BYTE[FILEDESC], 0x01	;; set hash-stream to stdout
 	or DWORD[ERRORCODE], 0x02
 	cmp rdi, 1
-	je EXIT
+	je EXIT_
 	mov DWORD[ERRORCODE], 0x00
 	mov rsi, QWORD[rsi]
 	add rsi, 8			;; now rsi is address of input message
@@ -189,7 +229,7 @@ padded:
 	
 	or DWORD[ERRORCODE], 0x01
 	cmp rax, 12			;; ENOMEM=12
-	je EXIT
+	je EXIT_
 	mov DWORD[ERRORCODE], 0x00	
 	mov QWORD[SOURCEMESSAGE], rax
 
@@ -218,7 +258,7 @@ zeroed:
 	ret
 
 
-APPEND_LENGTOF_MESSAGE:
+APPEND_LENGTHOF_MESSAGE:
 	mov edx, DWORD[INPUTLEN]
 	shl edx, 3			;; now unit is BIT
 	mov ecx, DWORD[SOURCELEN]
@@ -227,8 +267,8 @@ APPEND_LENGTOF_MESSAGE:
 
 INIT_MD5_BUFFER:
 	lea rsi, [MD5HASH]
-	mov QWORD[rsi],		0xefcdab8967452301
-	mov QWORD[rsi+8],	0x1032547698badcfe
+	mov QWORD[rsi],	0xefcdab8967452301
+	mov QWORD[rsi+8], 0x1032547698badcfe
 	ret
 
 PROCESSING_MD5_BUFFER:
@@ -238,17 +278,40 @@ PROCESSING_MD5_BUFFER:
 	add r11, r10			;; %r11-->LIMIT OF PROCESSING
 	
 proc_blk512:
-
+	
 	call complete_all_rounds
 	add r10, 0x40
 	cmp r10, r11
 	jl proc_blk512
 
-	ret	
+	ret
 
-EXIT:
-	;;ALSO HERE'S NEED DEALOCATION BUFFER-SOURCE (BY MUNMAP(), MAYBE);;
+WRITE_TO:
+	mov eax, 1
+	xor edi, edi
+	mov dil, BYTE[FILEDESC] 
+	lea rsi, [MD5HASH]
+	mov edx, HASHSIZE 
+	syscall
+	cmp eax, HASHSIZE
+	ret
+
+EXIT_:
+	cmp DWORD[ERRORCODE], 0x04
+	jl badmem_exit	
+	mov eax, 0x0b
+	mov rdi, QWORD[SOURCEMESSAGE]
+	mov esi, DWORD[SOURCELEN]
+	syscall
+
+badmem_exit:
 	mov eax, 60
 	mov edi, DWORD[ERRORCODE]
 	syscall
 
+DPRINT_HASH:
+	mov eax, 1
+	mov edi, 1
+	lea rsi, [MD5HASH]
+	mov edx, HASHSIZE
+	syscall

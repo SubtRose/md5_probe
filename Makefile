@@ -1,6 +1,6 @@
 PROGNAME= myMD5
 LFLAGS=
-NASMFLAGS=
+NASMFLAGS= -f elf64 -F dwarf -g -O0 -X gnu -w+x
 
 all: $(PROGNAME)
 $(PROGNAME): md5.o
